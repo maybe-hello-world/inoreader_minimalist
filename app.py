@@ -168,10 +168,10 @@ def edit_tag_batch(item_ids, add_tags=None, remove_tags=None):
     r.raise_for_status()
 
 def add_high_tag(item_ids):
-    edit_tag_batch(item_ids, add_tags=[HIGH_TAG])
+    edit_tag_batch(item_ids, add_tags=[HIGH_TAG], remove_tags=[READ_STATE])
 
 def add_medium_tag(item_ids):
-    edit_tag_batch(item_ids, add_tags=[MEDIUM_TAG])
+    edit_tag_batch(item_ids, add_tags=[MEDIUM_TAG], remove_tags=[READ_STATE])
 
 def remove_todo(item_ids):
     # remove the label for ALL processed items, regardless of score
