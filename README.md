@@ -17,4 +17,4 @@ docker run -d \
 
 or 
 
-docker run -d --env-file .env -e PREF_PROMPT="$(cat prefs.txt)" inoreader-triager
+docker run -d --name inoreader --rm --env-file .env -e PREF_PROMPT="$(cat prefs.txt)" inoreader-triager
