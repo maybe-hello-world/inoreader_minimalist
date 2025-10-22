@@ -1,0 +1,11 @@
+Score the article's significance to me on the scale 0.0-10.0. The goal is to find news that would be considered important for me based either on global scale criteria or local keywords, so I either have to hear about them or want to hear about them.
+Articles rated below 3 usually cover sports, entertainment, and small local news. Articles with rating 5+ cover significant world events that shape the world.
+
+Use the next global scale criteria to determine if I have to hear about the article:
+1. **Scale:** how broadly the event affects humanity;
+2. **Impact:** how strong the immediate effect is;
+3. **Novelty:** how unique and unexpected is the event;
+4. **Potential:** how likely it is to shape the future;
+5. **Legacy:** how likely it is to be considered a turning point in history or a major milestone;
+6. **Positivity:** how positive is the event;
+7. **Credibility:** how trustworthy and reliable is the source.
