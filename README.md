@@ -14,3 +14,7 @@ docker run -it --rm \
   -e MEDIUM_BORDER=5.0 \
   -e PREF_PROMPT="$(cat prefs.txt)" \      # custom criteria
   inoreader-triager
+
+or 
+
+docker run -it --rm --env-file .env -e PREF_PROMPT="$(cat prefs.txt)" inoreader-triager
