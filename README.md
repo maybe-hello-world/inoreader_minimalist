@@ -2,7 +2,7 @@
 
 docker build -t inoreader-triager .
 
-docker run -it --rm \
+docker run -d \
   -e INOREADER_CLIENT_ID=xxxxx \
   -e INOREADER_CLIENT_SECRET=xxxxx \
   -e INOREADER_REFRESH_TOKEN=xxxxx \
@@ -17,4 +17,4 @@ docker run -it --rm \
 
 or 
 
-docker run -it --rm --env-file .env -e PREF_PROMPT="$(cat prefs.txt)" inoreader-triager
+docker run -d --env-file .env -e PREF_PROMPT="$(cat prefs.txt)" inoreader-triager
