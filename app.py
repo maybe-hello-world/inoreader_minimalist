@@ -81,10 +81,10 @@ def fetch_unread_labeled_items(max_fetch=MAX_FETCH):
         params["c"] = cont
     return items
 
-# ---- OpenAI scoring (batch titles)
+# ---- OpenAI scoring
 def score_titles_openai(pairs):
     """
-    pairs: list of dicts {id: <inoreader_item_id>, title: <title>}
+    pairs: list of dicts {id: <inoreader_item_id>, content: <content>}
     returns dict {id: score_float}
     """
     url = "https://api.openai.com/v1/chat/completions"
@@ -93,12 +93,12 @@ def score_titles_openai(pairs):
         "Content-Type": "application/json",
     }
 
-    # We send a compact JSON payload of IDs and titles to minimize tokens.
-    articles = [{"id": p["id"], "title": p["title"]} for p in pairs]
+    # We send a compact JSON payload of IDs and content.
+    articles = [{"id": p["id"], "content": p["content"]} for p in pairs]
     user_payload = {
         "preferences": PREF_PROMPT,
         "instruction": (
-            "For each article, return a score from 0.0 to 10.0 based ONLY on the title. "
+            "For each article, return a score from 0.0 to 10.0 based ONLY on the provided content. "
             "Higher = more relevant for my stated preferences. If unclear, give 0.0. "
             "Return JSON object: {\"scores\":[{\"id\":\"...\",\"score\":7.3}...]}. "
             "Use one decimal place."
@@ -198,15 +198,15 @@ def run_once():
     # all fetched IDs (we'll remove the tag from ALL of these)
     all_ids = [it.get("id") for it in items if it.get("id")]
 
-    # score only items that have a title
-    pairs = [{"id": it["id"], "title": (it.get("title") or "").strip()}
-             for it in items if it.get("id") and (it.get("title") or "").strip()]
+    # score only items that have content
+    pairs = [{"id": it["id"], "content": (it.get("summary", {}).get("content") or "").strip()}
+             for it in items if it.get("id") and (it.get("summary", {}).get("content") or "").strip()]
 
     high_ids = []
     medium_ids = []
     if pairs:
         for batch in chunked(pairs, BATCH_SIZE):
-            print(f"[score] sending {len(batch)} titles to {OPENAI_MODEL}…")
+            print(f"[score] sending {len(batch)} contents to {OPENAI_MODEL}…")
             scores = score_titles_openai(batch)
             for p in batch:
                 s = scores.get(p["id"], 0.0)
@@ -217,7 +217,7 @@ def run_once():
         print(f"[score] total ≥ {HIGH_BORDER}: {len(high_ids)}")
         print(f"[score] total ≥ {MEDIUM_BORDER}: {len(medium_ids)}")
     else:
-        print("[score] no titled items to score.")
+        print("[score] no items to score.")
 
     # 1) star only the high ones (in chunks)
     if high_ids:
