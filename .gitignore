@@ -2,3 +2,4 @@
 .env
 .idea
 prefs.txt
+last_refresh_token.txt
