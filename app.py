@@ -47,20 +47,11 @@ def save_refresh_token(token):
         return
     token = token.strip()
     path = refresh_token_path()
-    dir_name = os.path.dirname(path)
-    if dir_name and dir_name not in ("", "."):
-        os.makedirs(dir_name, exist_ok=True)
-    tmp_path = f"{path}.tmp"
     try:
-        with open(tmp_path, "w", encoding="ascii") as handle:
+        with open(path, "w", encoding="ascii") as handle:
             handle.write(token)
-        os.replace(tmp_path, path)
     except Exception as exc:
         print(f"[auth] failed to persist refresh token: {exc}", file=sys.stderr)
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
 
 
 def load_refresh_token():
