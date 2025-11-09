@@ -16,6 +16,7 @@ MEDIUM_BORDER    = float(os.getenv("MEDIUM_BORDER", "5.0"))
 MAX_FETCH        = int(os.getenv("MAX_FETCH", "100"))
 BATCH_SIZE       = int(os.getenv("BATCH_SIZE", "50"))
 OPENAI_MODEL     = os.getenv("OPENAI_MODEL", "gpt-5-nano")
+REFRESH_TOKEN_FILE = os.getenv("REFRESH_TOKEN_FILE", "last_refresh_token.txt")
 
 PREF_PROMPT = os.getenv("PREF_PROMPT", """
 Score the article's significance to me on the scale 0.0-10.0. The goal is to find news that would be considered important for me based either on global scale criteria or local keywords, so I either have to hear about them or want to hear about them.  
@@ -31,17 +32,71 @@ Use the next global scale criteria to determine if I have to hear about the arti
 7. **Credibility:** how trustworthy and reliable is the source.
 """).strip()
 
+
+def refresh_token_path():
+    path = REFRESH_TOKEN_FILE
+    if os.path.isabs(path):
+        return path
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_dir, path)
+
+
+def save_refresh_token(token):
+    # Persist the most recent refresh token so restarts reuse the correct value.
+    if not token:
+        return
+    token = token.strip()
+    path = refresh_token_path()
+    dir_name = os.path.dirname(path)
+    if dir_name and dir_name not in ("", "."):
+        os.makedirs(dir_name, exist_ok=True)
+    tmp_path = f"{path}.tmp"
+    try:
+        with open(tmp_path, "w", encoding="ascii") as handle:
+            handle.write(token)
+        os.replace(tmp_path, path)
+    except Exception as exc:
+        print(f"[auth] failed to persist refresh token: {exc}", file=sys.stderr)
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+
+def load_refresh_token():
+    """Fetch the refresh token from disk or fall back to the environment."""
+    path = refresh_token_path()
+    if os.path.exists(path):
+        with open(path, "r", encoding="ascii") as handle:
+            token = handle.read().strip()
+            if token:
+                return token
+
+    token = os.environ.get("INOREADER_REFRESH_TOKEN", "").strip()
+    if token:
+        save_refresh_token(token)
+        return token
+
+    raise RuntimeError(
+        "Refresh token not found. Set INOREADER_REFRESH_TOKEN or create "
+        f"a token file at {path}."
+    )
+
 # ---- OAuth2: refresh token -> access token
 def refresh_inoreader_token():
+    refresh_token = load_refresh_token()
     data = {
         "grant_type": "refresh_token",
         "client_id": os.environ["INOREADER_CLIENT_ID"],
         "client_secret": os.environ["INOREADER_CLIENT_SECRET"],
-        "refresh_token": os.environ["INOREADER_REFRESH_TOKEN"],
+        "refresh_token": refresh_token,
     }
     r = requests.post(f"{INOREADER_BASE}/oauth2/token", data=data, timeout=30)
     r.raise_for_status()
-    tok = r.json()["access_token"]
+    payload = r.json()
+    tok = payload["access_token"]
+    new_refresh = payload.get("refresh_token")
+    save_refresh_token(new_refresh if new_refresh else refresh_token)
     return tok
 
 def ino_headers():
