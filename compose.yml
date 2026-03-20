@@ -1,0 +1,12 @@
+services:
+  inoreader:
+    build:
+      context: .
+    container_name: inoreader
+    env_file:
+      - .env
+    command: >
+      sh -c 'export PREF_PROMPT="$(cat /app/prefs.txt)" && exec python -u app.py'
+    volumes:
+      - ./last_refresh_token.txt:/app/last_refresh_token.txt
+      - ./prefs.txt:/app/prefs.txt:ro
