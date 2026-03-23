@@ -44,9 +44,21 @@ class _HTMLStripper(HTMLParser):
     def __init__(self):
         super().__init__()
         self._parts = []
+        # Track whether we are inside a <script> or <style> tag so their contents can be ignored.
+        self._skip_content = False
+
+    def handle_starttag(self, tag, attrs):
+        # Ignore text content inside <script> and <style> elements.
+        if tag.lower() in ("script", "style"):
+            self._skip_content = True
+
+    def handle_endtag(self, tag):
+        if tag.lower() in ("script", "style"):
+            self._skip_content = False
 
     def handle_data(self, data):
-        self._parts.append(data)
+        if not self._skip_content:
+            self._parts.append(data)
 
     def get_text(self):
         return " ".join(self._parts)
