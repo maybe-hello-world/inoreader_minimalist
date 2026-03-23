@@ -69,7 +69,7 @@ def strip_html(raw):
     if not raw:
         return ""
     stripper = _HTMLStripper()
-    stripper.feed(html.unescape(raw))
+    stripper.feed(raw)
     return " ".join(stripper.get_text().split())
 
 
