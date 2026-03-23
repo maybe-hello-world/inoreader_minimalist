@@ -3,3 +3,5 @@
 .idea
 prefs.txt
 last_refresh_token.txt
+__pycache__/
+*.pyc

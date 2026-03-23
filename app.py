@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-import os, time, json, math, sys
+import os, time, json, math, sys, html
 import requests
 from urllib.parse import quote
+from html.parser import HTMLParser
 
 INOREADER_BASE = "https://www.inoreader.com"
 STREAM_LABEL   = os.getenv("STREAM_LABEL", "significance_todo")
@@ -15,6 +16,7 @@ HIGH_BORDER      = float(os.getenv("HIGH_BORDER", "6.5"))
 MEDIUM_BORDER    = float(os.getenv("MEDIUM_BORDER", "5.0"))
 MAX_FETCH        = int(os.getenv("MAX_FETCH", "100"))
 BATCH_SIZE       = int(os.getenv("BATCH_SIZE", "50"))
+CONTENT_MAX_LEN  = int(os.getenv("CONTENT_MAX_LEN", "1500"))
 OPENAI_MODEL     = os.getenv("OPENAI_MODEL", "gpt-5-nano")
 REFRESH_TOKEN_FILE = os.getenv("REFRESH_TOKEN_FILE", "last_refresh_token.txt")
 
@@ -31,6 +33,44 @@ Use the next global scale criteria to determine if I have to hear about the arti
 6. **Positivity:** how positive is the event;  
 7. **Credibility:** how trustworthy and reliable is the source.
 """).strip()
+
+
+def chunked(seq, n):
+    for i in range(0, len(seq), n):
+        yield seq[i:i+n]
+
+class _HTMLStripper(HTMLParser):
+    """Minimal HTML-to-plaintext converter using the standard library."""
+    def __init__(self):
+        super().__init__()
+        self._parts = []
+        # Track whether we are inside a <script> or <style> tag so their contents can be ignored.
+        self._skip_content = False
+
+    def handle_starttag(self, tag, attrs):
+        # Ignore text content inside <script> and <style> elements.
+        if tag.lower() in ("script", "style"):
+            self._skip_content = True
+
+    def handle_endtag(self, tag):
+        if tag.lower() in ("script", "style"):
+            self._skip_content = False
+
+    def handle_data(self, data):
+        if not self._skip_content:
+            self._parts.append(data)
+
+    def get_text(self):
+        return " ".join(self._parts)
+
+
+def strip_html(raw):
+    """Strip HTML tags, unescape entities, and normalise whitespace."""
+    if not raw:
+        return ""
+    stripper = _HTMLStripper()
+    stripper.feed(raw)
+    return " ".join(stripper.get_text().split())
 
 
 def refresh_token_path():
@@ -130,7 +170,7 @@ def fetch_unread_labeled_items(max_fetch=MAX_FETCH):
 # ---- OpenAI scoring
 def score_titles_openai(pairs):
     """
-    pairs: list of dicts {id: <inoreader_item_id>, content: <content>}
+    pairs: list of dicts {id: <inoreader_item_id>, title: <title>, content: <content>}
     returns dict {id: score_float}
     """
     url = "https://api.openai.com/v1/chat/completions"
@@ -139,14 +179,13 @@ def score_titles_openai(pairs):
         "Content-Type": "application/json",
     }
 
-    # We send a compact JSON payload of IDs and content.
-    articles = [{"id": p["id"], "content": p["content"]} for p in pairs]
+    # We send a compact JSON payload of IDs, titles, and content.
+    articles = [{"id": p["id"], "title": p.get("title", ""), "content": p["content"]} for p in pairs]
     user_payload = {
         "preferences": PREF_PROMPT,
         "instruction": (
-            "For each article, return a score from 0.0 to 10.0 based ONLY on the provided content. "
+            "For each article, return a score from 0.0 to 10.0 based ONLY on the provided title and content. "
             "Higher = more relevant for my stated preferences. If unclear, give 0.0. "
-            "Return JSON object: {\"scores\":[{\"id\":\"...\",\"score\":7.3}...]}. "
             "Use one decimal place."
         ),
         "articles": articles,
@@ -155,7 +194,32 @@ def score_titles_openai(pairs):
     body = {
         "model": OPENAI_MODEL,
         "temperature": 1,
-        "response_format": {"type": "json_object"},
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "scoring_response",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "scores": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "score": {"type": "number"},
+                                },
+                                "required": ["id", "score"],
+                                "additionalProperties": False,
+                            },
+                        }
+                    },
+                    "required": ["scores"],
+                    "additionalProperties": False,
+                },
+            },
+        },
         "messages": [
             {
                 "role": "system",
@@ -223,10 +287,6 @@ def remove_todo(item_ids):
     # remove the label for ALL processed items, regardless of score
     edit_tag_batch(item_ids, remove_tags=[STREAM_ID])
 
-def chunked(seq, n):
-    for i in range(0, len(seq), n):
-        yield seq[i:i+n]
-
 def run_once():
     print(f"[poll] fetching unread items tagged '{STREAM_LABEL}'…")
     items = fetch_unread_labeled_items()
@@ -241,12 +301,27 @@ def run_once():
         item_id = item["id"].split("/")[-1]
         item["id"] = str(int(item_id, base=16))
 
-    # all fetched IDs (we'll remove the tag from ALL of these)
-    all_ids = [it.get("id") for it in items if it.get("id")]
+    # score only items that have content; strip HTML and truncate
+    pairs = []
+    for it in items:
+        if not it.get("id"):
+            continue
+        raw = (it.get("summary", {}).get("content") or "").strip()
+        text = strip_html(raw)
+        if len(text) > CONTENT_MAX_LEN:
+            text = text[:CONTENT_MAX_LEN].rsplit(" ", 1)[0]
+        content = text
+        if not content:
+            continue
+        pairs.append({
+            "id": it["id"],
+            "title": (it.get("title") or "").strip(),
+            "content": content,
+        })
 
-    # score only items that have content
-    pairs = [{"id": it["id"], "content": (it.get("summary", {}).get("content") or "").strip()}
-             for it in items if it.get("id") and (it.get("summary", {}).get("content") or "").strip()]
+    # items without content still need their todo label removed
+    pair_ids = {p["id"] for p in pairs}
+    no_content_ids = [it["id"] for it in items if it.get("id") and it["id"] not in pair_ids]
 
     high_ids = []
     medium_ids = []
@@ -254,29 +329,31 @@ def run_once():
         for batch in chunked(pairs, BATCH_SIZE):
             print(f"[score] sending {len(batch)} contents to {OPENAI_MODEL}…")
             scores = score_titles_openai(batch)
+            batch_high = []
+            batch_medium = []
             for p in batch:
                 s = scores.get(p["id"], 0.0)
                 if s >= HIGH_BORDER:
-                    high_ids.append(p["id"])
+                    batch_high.append(p["id"])
                 elif s >= MEDIUM_BORDER:
-                    medium_ids.append(p["id"])
+                    batch_medium.append(p["id"])
+            # Apply tags immediately so a later failure doesn't lose this batch
+            if batch_high:
+                add_high_tag(batch_high)
+            if batch_medium:
+                add_medium_tag(batch_medium)
+            remove_todo([p["id"] for p in batch])
+            high_ids.extend(batch_high)
+            medium_ids.extend(batch_medium)
         print(f"[score] total ≥ {HIGH_BORDER}: {len(high_ids)}")
         print(f"[score] total ≥ {MEDIUM_BORDER}: {len(medium_ids)}")
     else:
         print("[score] no items to score.")
 
-    # 1) star only the high ones (in chunks)
-    if high_ids:
-        for b in chunked(high_ids, BATCH_SIZE):
-            add_high_tag(b)
-    if medium_ids:
-        for b in chunked(medium_ids, BATCH_SIZE):
-            add_medium_tag(b)
-
-    # 2) ALWAYS remove the todo label from ALL processed items
-    if all_ids:
-        print(f"[tag] removing '{STREAM_LABEL}' from {len(all_ids)} items…")
-        for b in chunked(all_ids, BATCH_SIZE):
+    # Remove todo label from items that had no content
+    if no_content_ids:
+        print(f"[tag] removing '{STREAM_LABEL}' from {len(no_content_ids)} items without content…")
+        for b in chunked(no_content_ids, BATCH_SIZE):
             remove_todo(b)
         print("[tag] removal done.")
 
