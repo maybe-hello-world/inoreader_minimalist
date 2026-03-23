@@ -3,6 +3,7 @@ services:
     build:
       context: .
     container_name: inoreader
+    restart: unless-stopped
     env_file:
       - .env
     command: >
